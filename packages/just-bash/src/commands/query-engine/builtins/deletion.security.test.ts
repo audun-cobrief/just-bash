@@ -72,12 +72,41 @@ describe("query deletion safety", () => {
     ).toThrow(/query depth limit exceeded/);
   });
 
-  it("bounds recurse(f) paths that never terminate", () => {
+  it.each([
+    "del(recurse(.a))",
+    "[path(recurse(.))]",
+  ])("bounds recurse(f) paths that never terminate in %s", (filter) => {
     expect(() =>
-      evaluate(sanitizeParsedData({ a: null }), parse("del(recurse(.a))"), {
+      evaluate(sanitizeParsedData({ a: null }), parse(filter), {
         limits: { maxDepth: 10 },
       }),
     ).toThrow(/query depth limit exceeded/);
+  });
+
+  it.each([
+    ["[path(first(recurse(.)))]", [[]]],
+    ["[path(limit(2; recurse(.)))]", [[], []]],
+    ["[path(nth(1; .[], recurse(.)))]", [[1]]],
+    ["del(first(recurse(.) | .[0]))", [2]],
+  ])("stops collecting paths once %s has enough", (filter, expected) => {
+    expect(
+      evaluate(sanitizeParsedData([1, 2]), parse(filter), {
+        limits: { maxIterations: 20 },
+      }),
+    ).toEqual([expected]);
+  });
+
+  it.each([
+    "[path(first(.[]))]",
+    "[path(limit(2; ..))]",
+  ])("charges %s for every object key it lists", (filter) => {
+    const input = sanitizeParsedData(
+      Object.fromEntries(Array.from({ length: 1_000 }, (_, i) => [`k${i}`, i])),
+    );
+    expect(evaluate(input, parse(filter))).toHaveLength(1);
+    expect(() =>
+      evaluate(input, parse(filter), { limits: { maxIterations: 100 } }),
+    ).toThrow(/too many iterations/);
   });
 
   it("previews rejected path results without serializing them in full", () => {

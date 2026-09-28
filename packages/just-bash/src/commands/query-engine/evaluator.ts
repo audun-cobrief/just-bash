@@ -593,9 +593,9 @@ function evaluateNode(
     }
 
     case "Index": {
+      const indices = evaluate(value, ast.index, ctx);
       const bases = ast.base ? evaluate(value, ast.base, ctx) : [value];
       return boundedFlatMap(ctx, bases, (v) => {
-        const indices = evaluate(v, ast.index, ctx);
         return boundedFlatMap(ctx, indices, (idx) => {
           if (typeof idx === "number" && Array.isArray(v)) {
             // Handle NaN - return null for NaN index
@@ -788,12 +788,6 @@ function evaluateNode(
         if (isTruthy(c)) {
           return evaluate(value, ast.then, ctx);
         }
-        for (const elif of ast.elifs) {
-          const elifConds = evaluate(value, elif.cond, ctx);
-          if (elifConds.some(isTruthy)) {
-            return evaluate(value, elif.then, ctx);
-          }
-        }
         if (ast.else) {
           return evaluate(value, ast.else, ctx);
         }
@@ -941,7 +935,38 @@ function evaluateNode(
       const access = ast.expr;
       // A postfix `?` only suppresses errors from its final access, separately
       // for each base value, so errors in the base itself still propagate.
-      if ((isPathAccess(access) || access.type === "Slice") && access.base) {
+      if (access.type === "Index") {
+        const indices = evaluate(value, access.index, ctx);
+        const bases = access.base ? evaluate(value, access.base, ctx) : [value];
+        return boundedFlatMap(ctx, bases, (base) =>
+          boundedFlatMap(ctx, indices, (index) =>
+            tryEvaluate({
+              ...access,
+              base: { type: "Literal", value: base },
+              index: { type: "Literal", value: index },
+            }),
+          ),
+        );
+      }
+      if (access.type === "Slice") {
+        const { start, end } = access;
+        const starts = start ? evaluate(value, start, ctx) : [null];
+        const ends = end ? evaluate(value, end, ctx) : [null];
+        const bases = access.base ? evaluate(value, access.base, ctx) : [value];
+        return boundedFlatMap(ctx, bases, (base) =>
+          boundedFlatMap(ctx, starts, (s) =>
+            boundedFlatMap(ctx, ends, (e) =>
+              tryEvaluate({
+                ...access,
+                base: { type: "Literal", value: base },
+                start: start && { type: "Literal", value: s },
+                end: end && { type: "Literal", value: e },
+              }),
+            ),
+          ),
+        );
+      }
+      if (isPathAccess(access) && access.base) {
         const bases = evaluate(value, access.base, ctx);
         return boundedFlatMap(ctx, bases, (base) =>
           tryEvaluate({ ...access, base: { type: "Literal", value: base } }),
@@ -1407,7 +1432,11 @@ function applyDel(
  * Serializes a value as JSON only until the output exceeds `maxLength`
  * characters, so previews of large or deeply shared values stay cheap.
  */
-function jsonPrefix(value: QueryValue, maxLength: number): string {
+function jsonPrefix(
+  value: QueryValue,
+  maxLength: number,
+  ctx: EvalContext,
+): string {
   let output = "";
   const write = (item: QueryValue): void => {
     if (typeof item === "string") {
@@ -1421,13 +1450,13 @@ function jsonPrefix(value: QueryValue, maxLength: number): string {
       output += "]";
     } else if (item && typeof item === "object") {
       output += "{";
-      let first = true;
-      for (const [key, child] of Object.entries(item)) {
-        if (output.length > maxLength) break;
-        if (!first) output += ",";
-        first = false;
-        output += `${JSON.stringify(key.slice(0, maxLength + 1))}:`;
-        write(child);
+      const keys = Object.keys(item);
+      chargeQueryWork(ctx, keys.length);
+      for (let i = 0; i < keys.length && output.length <= maxLength; i++) {
+        if (i > 0) output += ",";
+        output += `${JSON.stringify(keys[i].slice(0, maxLength + 1))}:`;
+        // @banned-pattern-ignore: iterating via Object.keys() which only returns own properties
+        write((item as Record<string, QueryValue>)[keys[i]]);
       }
       output += "}";
     } else {
@@ -1442,9 +1471,13 @@ function jsonPrefix(value: QueryValue, maxLength: number): string {
  * Formats a value for an error message like jq's `jv_dump_string_trunc`:
  * JSON longer than `bufferSize - 1` UTF-8 bytes is cut and marked with "...".
  */
-function jqValuePreview(value: QueryValue, bufferSize: number): string {
+function jqValuePreview(
+  value: QueryValue,
+  bufferSize: number,
+  ctx: EvalContext,
+): string {
   const maxBytes = bufferSize - 1;
-  const json = jsonPrefix(value, maxBytes);
+  const json = jsonPrefix(value, maxBytes, ctx);
   const bytes = new TextEncoder().encode(json);
   if (bytes.length <= maxBytes) return json;
   return `${new TextDecoder().decode(bytes.subarray(0, maxBytes - 3))}...`;
@@ -1454,11 +1487,12 @@ function arithmeticTypeError(
   left: QueryValue,
   right: QueryValue,
   operation: string,
+  ctx: EvalContext,
 ): Error {
   const describe = (value: QueryValue): string => {
     const type =
       value === null ? "null" : Array.isArray(value) ? "array" : typeof value;
-    return `${type} (${jqValuePreview(value, 15)})`;
+    return `${type} (${jqValuePreview(value, 15, ctx)})`;
   };
   return new Error(
     `${describe(left)} and ${describe(right)} cannot be ${operation}`,
@@ -1540,13 +1574,13 @@ function evalBinaryOp(
           ) {
             return nullPrototypeMerge(l, r);
           }
-          throw arithmeticTypeError(l, r, "added");
+          throw arithmeticTypeError(l, r, "added", ctx);
         case "-":
           if (typeof l === "number" && typeof r === "number") return l - r;
           if (Array.isArray(l) && Array.isArray(r)) {
             return subtractArrays(l, r, ctx);
           }
-          throw arithmeticTypeError(l, r, "subtracted");
+          throw arithmeticTypeError(l, r, "subtracted", ctx);
         case "*":
           if (typeof l === "number" && typeof r === "number") return l * r;
           if (
@@ -1583,7 +1617,7 @@ function evalBinaryOp(
               });
             }
           }
-          throw arithmeticTypeError(l, r, "multiplied");
+          throw arithmeticTypeError(l, r, "multiplied", ctx);
         case "/":
           if (typeof l === "number" && typeof r === "number") {
             if (r === 0) {
@@ -1594,7 +1628,7 @@ function evalBinaryOp(
             return l / r;
           }
           if (typeof l === "string" && typeof r === "string") return l.split(r);
-          throw arithmeticTypeError(l, r, "divided");
+          throw arithmeticTypeError(l, r, "divided", ctx);
         case "%":
           if (typeof l === "number" && typeof r === "number") {
             if (r === 0) {
@@ -1613,7 +1647,7 @@ function evalBinaryOp(
             }
             return l % r;
           }
-          throw arithmeticTypeError(l, r, "divided (remainder)");
+          throw arithmeticTypeError(l, r, "divided (remainder)", ctx);
         case "==":
           return deepEqual(l, r);
         case "!=":
@@ -2061,33 +2095,52 @@ function collectPaths(
   paths: (string | number)[][],
   strict = false,
 ): void {
-  chargeQueryWork(ctx);
-  if (currentPath.length > ctx.limits.maxDepth) {
-    throw queryLimitError(
-      `query depth limit exceeded (${ctx.limits.maxDepth})`,
-      "recursion",
-    );
+  for (const path of pathsOf(value, expr, ctx, currentPath, strict)) {
+    assertQueryResultCapacity(ctx, paths.length);
+    paths.push(path);
   }
-  const appendPath = (path: (string | number)[]): void => {
-    if (path.length > ctx.limits.maxDepth) {
+}
+
+function* take<T>(items: Iterable<T>, count: number): Generator<T> {
+  if (count <= 0) return;
+  let taken = 0;
+  for (const item of items) {
+    yield item;
+    if (++taken >= count) return;
+  }
+}
+
+function* pathsOf(
+  value: QueryValue,
+  expr: AstNode,
+  ctx: EvalContext,
+  currentPath: (string | number)[],
+  strict: boolean,
+): Generator<(string | number)[]> {
+  chargeQueryWork(ctx);
+  const checkDepth = (depth: number): void => {
+    if (depth > ctx.limits.maxDepth) {
       throw queryLimitError(
         `query depth limit exceeded (${ctx.limits.maxDepth})`,
         "recursion",
       );
     }
-    assertQueryResultCapacity(ctx, paths.length);
-    paths.push(path);
+  };
+  checkDepth(currentPath.length);
+  const checkedPath = (path: (string | number)[]): (string | number)[] => {
+    checkDepth(path.length);
+    return path;
   };
   // Handle Comma - collect paths for both parts
   if (expr.type === "Comma") {
     const comma = expr as { type: "Comma"; left: AstNode; right: AstNode };
-    collectPaths(value, comma.left, ctx, currentPath, paths, strict);
-    collectPaths(value, comma.right, ctx, currentPath, paths, strict);
+    yield* pathsOf(value, comma.left, ctx, currentPath, strict);
+    yield* pathsOf(value, comma.right, ctx, currentPath, strict);
     return;
   }
 
   if (expr.type === "Paren") {
-    collectPaths(value, expr.expr, ctx, currentPath, paths, strict);
+    yield* pathsOf(value, expr.expr, ctx, currentPath, strict);
     return;
   }
 
@@ -2095,7 +2148,7 @@ function collectPaths(
   const staticPath = extractPathFromAst(expr);
   if (staticPath !== null) {
     getPathValue(value, staticPath, ctx);
-    appendPath([...currentPath, ...staticPath]);
+    yield checkedPath([...currentPath, ...staticPath]);
     return;
   }
 
@@ -2105,29 +2158,30 @@ function collectPaths(
     expr.type === "Optional" && isPathAccess(expr.expr) ? expr.expr : expr;
   const optional = access !== expr;
   if (isPathAccess(access)) {
-    const basePaths: (string | number)[][] = [];
-    if (access.base) {
-      collectPaths(value, access.base, ctx, [], basePaths, strict);
-    } else {
-      basePaths.push([]);
-    }
+    const basePaths: Iterable<(string | number)[]> = access.base
+      ? pathsOf(value, access.base, ctx, [], strict)
+      : [[]];
     for (const basePath of basePaths) {
       const baseValue = getPathValue(value, basePath, ctx);
-      const appendChild = (key: string | number): void => {
+      const canAccess = (key: string | number): boolean => {
         try {
           getPathComponent(baseValue, key);
+          return true;
         } catch (error) {
-          if (optional && !(error instanceof ExecutionLimitError)) return;
+          if (optional && !(error instanceof ExecutionLimitError)) return false;
           throw error;
         }
-        appendPath([...currentPath, ...basePath, key]);
       };
       if (access.type === "Field") {
-        appendChild(access.name);
+        if (canAccess(access.name)) {
+          yield checkedPath([...currentPath, ...basePath, access.name]);
+        }
       } else if (access.type === "Index") {
         for (const index of evaluate(value, access.index, ctx)) {
           if (typeof index === "string" || typeof index === "number") {
-            appendChild(index);
+            if (canAccess(index)) {
+              yield checkedPath([...currentPath, ...basePath, index]);
+            }
           } else if (!optional) {
             throw new Error("path components must be strings or numbers");
           }
@@ -2135,17 +2189,18 @@ function collectPaths(
       } else if (Array.isArray(baseValue)) {
         for (let index = 0; index < baseValue.length; index++) {
           chargeQueryWork(ctx);
-          appendPath([...currentPath, ...basePath, index]);
+          yield checkedPath([...currentPath, ...basePath, index]);
         }
       } else if (baseValue && typeof baseValue === "object") {
-        for (const key of Object.keys(baseValue)) {
-          chargeQueryWork(ctx);
-          appendPath([...currentPath, ...basePath, key]);
+        const keys = Object.keys(baseValue);
+        chargeQueryWork(ctx, keys.length);
+        for (const key of keys) {
+          yield checkedPath([...currentPath, ...basePath, key]);
         }
       } else if (!optional) {
         const type = baseValue === null ? "null" : typeof baseValue;
         throw new Error(
-          `Cannot iterate over ${type} (${jqValuePreview(baseValue, 15)})`,
+          `Cannot iterate over ${type} (${jqValuePreview(baseValue, 15, ctx)})`,
         );
       }
     }
@@ -2163,8 +2218,7 @@ function collectPaths(
     while (stack.length > 0) {
       const entry = stack.pop();
       if (!entry) break;
-      chargeQueryWork(ctx);
-      appendPath([...currentPath, ...entry.path]);
+      yield checkedPath([...currentPath, ...entry.path]);
       if (entry.value && typeof entry.value === "object") {
         const entries = Array.isArray(entry.value)
           ? entry.value.map((child, index) => [index, child] as const)
@@ -2176,6 +2230,7 @@ function collectPaths(
                   (entry.value as Record<string, unknown>)[key],
                 ] as const,
             );
+        chargeQueryWork(ctx, entries.length);
         assertQueryResultCapacity(ctx, 0, stack.length + entries.length);
         for (let i = entries.length - 1; i >= 0; i--) {
           const [key, child] = entries[i];
@@ -2187,15 +2242,12 @@ function collectPaths(
   }
 
   if (expr.type === "Pipe") {
-    const leftPaths: (string | number)[][] = [];
-    collectPaths(value, expr.left, ctx, [], leftPaths, strict);
-    for (const leftPath of leftPaths) {
-      collectPaths(
+    for (const leftPath of pathsOf(value, expr.left, ctx, [], strict)) {
+      yield* pathsOf(
         getPathValue(value, leftPath, ctx),
         expr.right,
         ctx,
         [...currentPath, ...leftPath],
-        paths,
         strict,
       );
     }
@@ -2204,34 +2256,31 @@ function collectPaths(
 
   if (expr.type === "Optional") {
     try {
-      collectPaths(value, expr.expr, ctx, currentPath, paths, strict);
+      yield* pathsOf(value, expr.expr, ctx, currentPath, strict);
     } catch (error) {
       if (error instanceof ExecutionLimitError) throw error;
     }
     return;
   }
 
-  const appendResults = (results: QueryValue[]): void => {
-    if (results.length === 0) return;
+  const resultPaths = (results: QueryValue[]): (string | number)[][] => {
+    if (results.length === 0) return [];
     // Preserve path()/pick()'s fallback, but never guess a deletion target from
     // an evaluated value: a transformation could otherwise delete its input.
-    if (!strict) {
-      appendPath(currentPath);
-      return;
-    }
+    if (!strict) return [currentPath];
     throw new Error(
-      `Invalid path expression with result ${jqValuePreview(results[0], 30)}`,
+      `Invalid path expression with result ${jqValuePreview(results[0], 30, ctx)}`,
     );
   };
 
   if (expr.type === "Try") {
     try {
-      collectPaths(value, expr.body, ctx, currentPath, paths, strict);
+      yield* pathsOf(value, expr.body, ctx, currentPath, strict);
     } catch (error) {
       if (error instanceof ExecutionLimitError) throw error;
       if (error instanceof BreakError) throw error;
       if (expr.catch) {
-        appendResults(evaluate(caughtErrorValue(error), expr.catch, ctx));
+        yield* resultPaths(evaluate(caughtErrorValue(error), expr.catch, ctx));
       }
     }
     return;
@@ -2240,14 +2289,7 @@ function collectPaths(
   if (expr.type === "Label") {
     const labels = new Set([...(ctx.labels ?? []), expr.name]);
     try {
-      collectPaths(
-        value,
-        expr.body,
-        { ...ctx, labels },
-        currentPath,
-        paths,
-        strict,
-      );
+      yield* pathsOf(value, expr.body, { ...ctx, labels }, currentPath, strict);
     } catch (error) {
       if (!(error instanceof BreakError && error.label === expr.name)) {
         throw error;
@@ -2260,12 +2302,11 @@ function collectPaths(
   // rejects inside path expressions, so only plain `as $name` passes through.
   if (expr.type === "VarBind" && !expr.pattern && !expr.alternatives) {
     for (const bound of evaluate(value, expr.value, ctx)) {
-      collectPaths(
+      yield* pathsOf(
         value,
         expr.body,
         withVar(ctx, expr.name, bound),
         currentPath,
-        paths,
         strict,
       );
     }
@@ -2274,71 +2315,55 @@ function collectPaths(
 
   if (expr.type === "Cond") {
     for (const cond of evaluate(value, expr.cond, ctx)) {
-      const branch = isTruthy(cond)
-        ? expr.then
-        : (expr.elifs.find((elif) =>
-            evaluate(value, elif.cond, ctx).some(isTruthy),
-          )?.then ?? expr.else);
+      const branch = isTruthy(cond) ? expr.then : expr.else;
       if (branch) {
-        collectPaths(value, branch, ctx, currentPath, paths, strict);
+        yield* pathsOf(value, branch, ctx, currentPath, strict);
       } else {
-        appendPath(currentPath);
+        yield currentPath;
       }
     }
     return;
   }
 
   if (expr.type === "BinaryOp" && expr.op === "//") {
-    const leftPaths: (string | number)[][] = [];
-    collectPaths(value, expr.left, ctx, [], leftPaths, strict);
-    const truthyPaths = leftPaths.filter((path) =>
-      isTruthy(getPathValue(value, path, ctx)),
-    );
-    if (truthyPaths.length === 0) {
-      collectPaths(value, expr.right, ctx, currentPath, paths, strict);
-    }
-    for (const path of truthyPaths) appendPath([...currentPath, ...path]);
-    return;
-  }
-
-  // Like jq, keep only the first `count` paths and ignore an error raised
-  // after them, since jq stops the generator before reaching it.
-  const leadingPaths = (
-    generator: AstNode,
-    count: number,
-  ): (string | number)[][] => {
-    const leading: (string | number)[][] = [];
-    try {
-      collectPaths(value, generator, ctx, currentPath, leading, strict);
-    } catch (error) {
-      if (error instanceof ExecutionLimitError || leading.length < count) {
-        throw error;
+    let found = false;
+    for (const path of pathsOf(value, expr.left, ctx, [], strict)) {
+      if (isTruthy(getPathValue(value, path, ctx))) {
+        found = true;
+        yield checkedPath([...currentPath, ...path]);
       }
     }
-    return leading.slice(0, count);
-  };
+    if (!found) yield* pathsOf(value, expr.right, ctx, currentPath, strict);
+    return;
+  }
 
   if (expr.type === "Call" && expr.args.length > 0) {
     const [first, second] = expr.args;
     if (expr.name === "first" && expr.args.length === 1) {
-      for (const path of leadingPaths(first, 1)) appendPath(path);
+      yield* take(pathsOf(value, first, ctx, currentPath, strict), 1);
       return;
     }
     if (expr.name === "limit" && second) {
       for (const n of evaluate(value, first, ctx)) {
         const count = n as number;
         if (count < 0) throw new Error("limit doesn't support negative count");
-        if (count === 0) continue;
-        for (const path of leadingPaths(second, count)) appendPath(path);
+        yield* take(pathsOf(value, second, ctx, currentPath, strict), count);
       }
       return;
     }
     if (expr.name === "nth" && second) {
       for (const n of evaluate(value, first, ctx)) {
         const index = n as number;
-        if (index < 0) throw new Error("nth doesn't support negative indices");
-        const path = leadingPaths(second, index + 1)[index];
-        if (path) appendPath(path);
+        if (index < 0 || Number.isNaN(index)) {
+          throw new Error("nth doesn't support negative indices");
+        }
+        let seen = 0;
+        for (const path of pathsOf(value, second, ctx, currentPath, strict)) {
+          if (seen++ >= index) {
+            yield path;
+            break;
+          }
+        }
       }
       return;
     }
@@ -2355,45 +2380,66 @@ function collectPaths(
           keys.push(key);
         }
         getPathValue(value, keys, ctx);
-        appendPath([...currentPath, ...keys]);
+        yield checkedPath([...currentPath, ...keys]);
+      }
+      return;
+    }
+    if (
+      (expr.name === "ltrimstr" || expr.name === "rtrimstr") &&
+      expr.args.length === 1
+    ) {
+      const left = expr.name === "ltrimstr";
+      for (const affix of evaluate(value, first, ctx)) {
+        if (
+          typeof value !== "string" ||
+          typeof affix !== "string" ||
+          !(left ? value.startsWith(affix) : value.endsWith(affix))
+        ) {
+          yield currentPath;
+          continue;
+        }
+        yield* resultPaths([
+          left
+            ? value.slice(affix.length)
+            : value.slice(0, value.length - affix.length),
+        ]);
       }
       return;
     }
     if (expr.name === "recurse" && expr.args.length <= 2) {
-      const stack: (string | number)[][] = [[]];
+      const children = function* (path: (string | number)[]) {
+        const parent = getPathValue(value, path, ctx);
+        for (const child of pathsOf(parent, first, ctx, path, strict)) {
+          if (!second) {
+            yield child;
+            continue;
+          }
+          const conds = evaluate(getPathValue(value, child, ctx), second, ctx);
+          for (const cond of conds) if (isTruthy(cond)) yield child;
+        }
+      };
+      yield currentPath;
+      const stack = [children([])];
       while (stack.length > 0) {
-        const path = stack.pop();
-        if (!path) break;
-        appendPath([...currentPath, ...path]);
-        const children: (string | number)[][] = [];
-        collectPaths(
-          getPathValue(value, path, ctx),
-          first,
-          ctx,
-          path,
-          children,
-          strict,
-        );
-        const next = second
-          ? children.filter((child) =>
-              evaluate(getPathValue(value, child, ctx), second, ctx).some(
-                isTruthy,
-              ),
-            )
-          : children;
-        assertQueryResultCapacity(ctx, 0, stack.length + next.length);
-        for (let i = next.length - 1; i >= 0; i--) stack.push(next[i]);
+        const next = stack[stack.length - 1].next();
+        if (next.done) {
+          stack.pop();
+          continue;
+        }
+        yield checkedPath([...currentPath, ...next.value]);
+        checkDepth(stack.length);
+        stack.push(children(next.value));
       }
       return;
     }
   }
 
   const results = evaluate(value, expr, ctx);
-  if (strict && expr.type === "Call" && returnsInput(expr, value, ctx)) {
-    for (const _result of results) appendPath(currentPath);
+  if (strict && expr.type === "Call" && returnsInput(expr, value)) {
+    for (const _result of results) yield currentPath;
     return;
   }
-  appendResults(results);
+  yield* resultPaths(results);
 }
 
 /**
@@ -2403,7 +2449,6 @@ function collectPaths(
 function returnsInput(
   call: Extract<AstNode, { type: "Call" }>,
   value: QueryValue,
-  ctx: EvalContext,
 ): boolean {
   if (PATH_PRESERVING_BUILTINS.has(call.name)) return true;
   switch (call.name) {
@@ -2411,15 +2456,6 @@ function returnsInput(
       return typeof value === "number";
     case "tostring":
       return typeof value === "string";
-    case "ltrimstr":
-    case "rtrimstr": {
-      if (typeof value !== "string" || call.args.length !== 1) return true;
-      const [affix] = evaluate(value, call.args[0], ctx);
-      if (typeof affix !== "string") return true;
-      return call.name === "ltrimstr"
-        ? !value.startsWith(affix)
-        : !value.endsWith(affix);
-    }
     default:
       return false;
   }

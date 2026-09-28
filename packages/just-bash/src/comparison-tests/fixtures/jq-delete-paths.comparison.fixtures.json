@@ -116,6 +116,15 @@
     "stderr": "",
     "exitCode": 0
   },
+  "1ffc2b01f956f4b1": {
+    "command": "jq -c '[path(first(recurse(.)))]' input.json",
+    "files": {
+      "input.json": "[1,2]"
+    },
+    "stdout": "[[]]\n",
+    "stderr": "",
+    "exitCode": 0
+  },
   "21954eeabdb21159": {
     "command": "jq -c 'del(getpath([\"a\",\"b\"]))' input.json",
     "files": {
@@ -149,6 +158,15 @@
       "input.json": "{\"a\":\"abc\"}"
     },
     "stdout": "{}\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  "28542a4e9732ddfb": {
+    "command": "jq -c 'try del(.a | length) catch .' input.json",
+    "files": {
+      "input.json": "{\"a\":3}"
+    },
+    "stdout": "\"Invalid path expression with result 3\"\n",
     "stderr": "",
     "exitCode": 0
   },
@@ -212,6 +230,15 @@
       "input.json": "{\"a\":[null,false]}"
     },
     "stdout": "[[\"b\"]]\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  "3ccb5c566fb9d9d1": {
+    "command": "jq -c '[path(first(recurse(.) | .[0]))]' input.json",
+    "files": {
+      "input.json": "[[1],[2,3]]"
+    },
+    "stdout": "[[0]]\n",
     "stderr": "",
     "exitCode": 0
   },
@@ -296,12 +323,30 @@
     "stderr": "",
     "exitCode": 0
   },
+  "53b46daeaa156d2c": {
+    "command": "jq -c '[path(limit(1.5; .[][]))]' input.json",
+    "files": {
+      "input.json": "[[1],[2,3]]"
+    },
+    "stdout": "[[0,0],[1,0]]\n",
+    "stderr": "",
+    "exitCode": 0
+  },
   "549de3e4d904f9ff": {
     "command": "jq -c 'del(.[-1.5])' input.json",
     "files": {
       "input.json": "[1,2,3]"
     },
     "stdout": "[1,2]\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  "58eb4226c04eeeb0": {
+    "command": "jq -c '[path(.a | ltrimstr(\"z\",\"y\"))]' input.json",
+    "files": {
+      "input.json": "{\"a\":\"abc\"}"
+    },
+    "stdout": "[[\"a\"],[\"a\"]]\n",
     "stderr": "",
     "exitCode": 0
   },
@@ -323,6 +368,15 @@
     "stderr": "",
     "exitCode": 0
   },
+  "5d8dd73a13d2208a": {
+    "command": "jq -c 'del(if false then .a elif empty then .b else .c end)' input.json",
+    "files": {
+      "input.json": "{\"a\":1,\"b\":2,\"c\":3}"
+    },
+    "stdout": "{\"a\":1,\"b\":2,\"c\":3}\n",
+    "stderr": "",
+    "exitCode": 0
+  },
   "5e12add6f9c40f87": {
     "command": "jq -c 'del(.arr[-1] | .x)' input.json",
     "files": {
@@ -338,6 +392,15 @@
       "input.json": "{\"a\":null}"
     },
     "stdout": "{\"a\":null}\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  "60cf245b9329cbf9": {
+    "command": "jq -c '[if false then .a elif (true,false) then .b else .c end]' input.json",
+    "files": {
+      "input.json": "{\"a\":1,\"b\":2,\"c\":3}"
+    },
+    "stdout": "[2,3]\n",
     "stderr": "",
     "exitCode": 0
   },
@@ -422,6 +485,15 @@
     "stderr": "",
     "exitCode": 0
   },
+  "73ffb4fc90d7f08c": {
+    "command": "jq -c 'try del(.a | ltrimstr(\"z\",\"a\")) catch .' input.json",
+    "files": {
+      "input.json": "{\"a\":\"abc\"}"
+    },
+    "stdout": "\"Invalid path expression with result \\\"bc\\\"\"\n",
+    "stderr": "",
+    "exitCode": 0
+  },
   "7513ff208fe1f4cd": {
     "command": "jq -c 'del(.arr[]?)' input.json",
     "files": {
@@ -446,6 +518,42 @@
       "input.json": "[[1],null,[2]]"
     },
     "stdout": "[[],null,[2]]\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  "7c77147d39aa2ad5": {
+    "command": "jq -c '[path(nth(1.5; .[][]))]' input.json",
+    "files": {
+      "input.json": "[[1],[2,3]]"
+    },
+    "stdout": "[[1,1]]\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  "7cf0105ff86588c5": {
+    "command": "jq -c '[path(nth(1; .[], recurse(.)))]' input.json",
+    "files": {
+      "input.json": "[1,2]"
+    },
+    "stdout": "[[1]]\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  "80121ea638bfdbe0": {
+    "command": "jq -c '[if false then .a elif empty then .b else .c end]' input.json",
+    "files": {
+      "input.json": "{\"a\":1,\"b\":2,\"c\":3}"
+    },
+    "stdout": "[]\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  "806e5362836f2fbc": {
+    "command": "jq -c 'del(nth(1; .[]))' input.json",
+    "files": {
+      "input.json": "[1,[2]]"
+    },
+    "stdout": "[1]\n",
     "stderr": "",
     "exitCode": 0
   },
@@ -539,6 +647,24 @@
     "stderr": "",
     "exitCode": 0
   },
+  "9a2f1b78b2daf6e8": {
+    "command": "jq -c '[path(recurse(.a; . != null and (true,true)))]' input.json",
+    "files": {
+      "input.json": "{\"a\":{\"a\":null}}"
+    },
+    "stdout": "[[],[\"a\"],[\"a\"]]\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  "9d2be42ee4ae9e59": {
+    "command": "jq -c 'try [path(nth(nan; .[]))] catch .' input.json",
+    "files": {
+      "input.json": "[1,2,3]"
+    },
+    "stdout": "\"nth doesn't support negative indices\"\n",
+    "stderr": "",
+    "exitCode": 0
+  },
   "9d3676d98e580108": {
     "command": "jq -c 'try del(.a.b) catch .' input.json",
     "files": {
@@ -554,6 +680,15 @@
       "input.json": "{\"arr\":[]}"
     },
     "stdout": "{\"arr\":[]}\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  "a00d543525397ba0": {
+    "command": "jq -c 'del(first(recurse(.[]?) | select(. == 2)))' input.json",
+    "files": {
+      "input.json": "[1,[2,[3,2]]]"
+    },
+    "stdout": "[1,[[3,2]]]\n",
     "stderr": "",
     "exitCode": 0
   },
@@ -581,6 +716,15 @@
       "input.json": "{\"a\":1}"
     },
     "stdout": "{\"a\":1}\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  "a624fbbab1947f02": {
+    "command": "jq -c '[path(if false then .a elif false then .b elif (true,false) then .c end)]' input.json",
+    "files": {
+      "input.json": "{\"a\":1,\"b\":2,\"c\":3}"
+    },
+    "stdout": "[[\"c\"],[]]\n",
     "stderr": "",
     "exitCode": 0
   },
@@ -737,6 +881,15 @@
     "stderr": "",
     "exitCode": 0
   },
+  "c9ceea375aae4f81": {
+    "command": "jq -c 'del(label $f | .a)' input.json",
+    "files": {
+      "input.json": "{\"a\":1}"
+    },
+    "stdout": "{}\n",
+    "stderr": "",
+    "exitCode": 0
+  },
   "cca897f385cdeb67": {
     "command": "jq -c 'del(recurse | numbers)' input.json",
     "files": {
@@ -845,6 +998,15 @@
     "stderr": "",
     "exitCode": 0
   },
+  "e602976de1391ff8": {
+    "command": "jq -c 'try del(.a | . + 0) catch .' input.json",
+    "files": {
+      "input.json": "{\"a\":3}"
+    },
+    "stdout": "\"Invalid path expression with result 3\"\n",
+    "stderr": "",
+    "exitCode": 0
+  },
   "ed13be3bf60062d8": {
     "command": "jq -c 'del(.missing.child)' input.json",
     "files": {
@@ -890,6 +1052,15 @@
     "stderr": "",
     "exitCode": 0
   },
+  "f48821a673681c8e": {
+    "command": "jq -c 'del(if false then . elif (true,false) then .a else .b end)' input.json",
+    "files": {
+      "input.json": "{\"a\":1,\"b\":2,\"c\":3}"
+    },
+    "stdout": "{\"c\":3}\n",
+    "stderr": "",
+    "exitCode": 0
+  },
   "f56699d65f3ed39a": {
     "command": "jq -c 'del(.[] | booleans)' input.json",
     "files": {
@@ -905,6 +1076,15 @@
       "input.json": "{\"a\":1}"
     },
     "stdout": "[]\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  "f9c87c0d124aff86": {
+    "command": "jq -c '[path(limit(2; recurse(.)))]' input.json",
+    "files": {
+      "input.json": "[1,2]"
+    },
+    "stdout": "[[],[]]\n",
     "stderr": "",
     "exitCode": 0
   },
@@ -932,6 +1112,15 @@
       "input.json": "{\"a\":1}"
     },
     "stdout": "\"Cannot index number with string \\\"b\\\"\"\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  "fcc612a692a45be5": {
+    "command": "jq -c '[.a[.i]]' input.json",
+    "files": {
+      "input.json": "{\"i\":\"y\",\"a\":{\"i\":\"x\",\"x\":1,\"y\":2}}"
+    },
+    "stdout": "[2]\n",
     "stderr": "",
     "exitCode": 0
   },

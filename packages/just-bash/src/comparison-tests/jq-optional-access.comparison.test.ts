@@ -25,6 +25,11 @@ describe("jq postfix optional access", () => {
     ['{"a":1}', "[.a.b?]"],
     ["1", "[.a?.b]"],
     ["1", "try [.a.b?] catch ."],
+    ['{"i":"y","a":{"i":"x","x":1,"y":2}}', "[.a[.i]?]"],
+    ['{"a":[1,2,3,4],"s":1,"e":3}', "[.a[.s:.e]?]"],
+    ["[1,2]", 'try [.[error("x")]?] catch .'],
+    ["[[1,2],[3]]", 'try [.[error("x"):]?] catch .'],
+    ["[[1,2],[3]]", 'try [(.[0], error("y"))[error("x")]?] catch .'],
   ])("%s | %s", async (input, filter) => {
     const env = await setupFiles(testDir, { "input.json": input });
     await compareOutputs(env, testDir, `jq -c '${filter}' input.json`);

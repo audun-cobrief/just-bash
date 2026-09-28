@@ -1,4 +1,13 @@
 {
+  "0f593201ed41b29a": {
+    "command": "jq -c 'try [(.[0], error(\"y\"))[error(\"x\")]?] catch .' input.json",
+    "files": {
+      "input.json": "[[1,2],[3]]"
+    },
+    "stdout": "\"x\"\n",
+    "stderr": "",
+    "exitCode": 0
+  },
   "1aed8894d5efa2a6": {
     "command": "jq -c '[.a[]?.b?]' input.json",
     "files": {
@@ -17,12 +26,30 @@
     "stderr": "",
     "exitCode": 0
   },
+  "32076c95835f36a4": {
+    "command": "jq -c '[.a[.s:.e]?]' input.json",
+    "files": {
+      "input.json": "{\"a\":[1,2,3,4],\"s\":1,\"e\":3}"
+    },
+    "stdout": "[[2,3]]\n",
+    "stderr": "",
+    "exitCode": 0
+  },
   "78c90ce136e43120": {
     "command": "jq -c 'try [.a.b?] catch .' input.json",
     "files": {
       "input.json": "1"
     },
     "stdout": "\"Cannot index number with string \\\"a\\\"\"\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  "88b752a5a72cb6f9": {
+    "command": "jq -c 'try [.[error(\"x\"):]?] catch .' input.json",
+    "files": {
+      "input.json": "[[1,2],[3]]"
+    },
+    "stdout": "\"x\"\n",
     "stderr": "",
     "exitCode": 0
   },
@@ -53,6 +80,15 @@
     "stderr": "",
     "exitCode": 0
   },
+  "c9e741986d2d3e27": {
+    "command": "jq -c '[.a[.i]?]' input.json",
+    "files": {
+      "input.json": "{\"i\":\"y\",\"a\":{\"i\":\"x\",\"x\":1,\"y\":2}}"
+    },
+    "stdout": "[2]\n",
+    "stderr": "",
+    "exitCode": 0
+  },
   "cc5fd115a0ae5e23": {
     "command": "jq -c '[.a.b?]' input.json",
     "files": {
@@ -68,6 +104,15 @@
       "input.json": "[1,{\"a\":1}]"
     },
     "stdout": "[1]\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  "e9415db0b9e3a3b9": {
+    "command": "jq -c 'try [.[error(\"x\")]?] catch .' input.json",
+    "files": {
+      "input.json": "[1,2]"
+    },
+    "stdout": "\"x\"\n",
     "stderr": "",
     "exitCode": 0
   },

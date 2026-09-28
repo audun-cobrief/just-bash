@@ -480,9 +480,6 @@ const SKIP_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
     reason: "min/max with complex comparison",
   },
 
-  // Dynamic field access
-  { pattern: /\.foo\[\.baz\]/, reason: "Dynamic field access" },
-
   // Keywords as identifiers
   { pattern: /\$foreach.*\$and.*\$or/, reason: "Keywords as variables" },
   { pattern: /\{ \$x, as,/, reason: "Complex object shorthand" },

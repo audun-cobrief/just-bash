@@ -80,6 +80,20 @@ describe("query array subtraction safety", () => {
     ).toEqual(["array ([[[[[[[[[[[...) and number (1) cannot be subtracted"]);
   });
 
+  it("charges operand previews for every object key they list", () => {
+    const input = sanitizeParsedData(
+      Object.fromEntries(Array.from({ length: 1_000 }, (_, i) => [`k${i}`, i])),
+    );
+    expect(evaluate(input, parse("try (. - 1) catch ."))).toEqual([
+      'object ({"k0":0,"k1...) and number (1) cannot be subtracted',
+    ]);
+    expect(() =>
+      evaluate(input, parse("try (. - 1) catch ."), {
+        limits: { maxIterations: 100 },
+      }),
+    ).toThrow(/too many iterations/);
+  });
+
   it("bounds result allocation even when the right operand is empty", () => {
     expect(() =>
       evaluate([1, 2, 3, 4], parse(". - []"), {

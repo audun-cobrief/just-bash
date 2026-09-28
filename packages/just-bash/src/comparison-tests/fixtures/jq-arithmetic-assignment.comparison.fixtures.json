@@ -26,6 +26,15 @@
     "stderr": "",
     "exitCode": 0
   },
+  "1a5c90c2a0b58e83": {
+    "command": "jq -c '. *= \"ab\"' input.json",
+    "files": {
+      "input.json": "-1"
+    },
+    "stdout": "null\n",
+    "stderr": "",
+    "exitCode": 0
+  },
   "25411f55f2fd3f86": {
     "command": "jq -c 'try (.value -= 1) catch .' input.json",
     "files": {
@@ -43,6 +52,15 @@
     "stdout": "\"string (\\\"\\\\u0001\\\\u00...) and number (1) cannot be subtracted\"\n",
     "stderr": "",
     "exitCode": 0
+  },
+  "37be043eb2fb5b08": {
+    "command": "jq -c '. /= 0' input.json",
+    "files": {
+      "input.json": "8"
+    },
+    "stdout": "",
+    "stderr": "jq: error (at input.json:0): number (8) and number (0) cannot be divided because the divisor is zero\n",
+    "exitCode": 5
   },
   "4040c5306c9b1596": {
     "command": "jq -c '.arr += [\"a\"]' input.json",
@@ -80,6 +98,24 @@
     "stderr": "",
     "exitCode": 0
   },
+  "4ab370088df1ff1f": {
+    "command": "jq -c 'try (. /= 0) catch .' input.json",
+    "files": {
+      "input.json": "8"
+    },
+    "stdout": "\"number (8) and number (0) cannot be divided because the divisor is zero\"\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  "4dd120262ae2b5c8": {
+    "command": "jq -c '.value - 1' input.json",
+    "files": {
+      "input.json": "{\"value\":[1,2]}"
+    },
+    "stdout": "",
+    "stderr": "jq: error (at input.json:0): array ([1,2]) and number (1) cannot be subtracted\n",
+    "exitCode": 5
+  },
   "5977ad586052a222": {
     "command": "jq -c 'try (.value -= 1) catch .' input.json",
     "files": {
@@ -116,12 +152,30 @@
     "stderr": "",
     "exitCode": 0
   },
+  "68548ad7e751656f": {
+    "command": "jq -c 'try (.value - 1) catch .' input.json",
+    "files": {
+      "input.json": "{\"value\":null}"
+    },
+    "stdout": "\"null (null) and number (1) cannot be subtracted\"\n",
+    "stderr": "",
+    "exitCode": 0
+  },
   "6a77fc2d9aecd8c0": {
     "command": "jq -c '.arr -= []' input.json",
     "files": {
       "input.json": "{\"arr\":[1,2]}"
     },
     "stdout": "{\"arr\":[1,2]}\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  "749fb392618a84ef": {
+    "command": "jq -c 'try (.value / 2) catch .' input.json",
+    "files": {
+      "input.json": "{\"value\":{\"a\":1}}"
+    },
+    "stdout": "\"object ({\\\"a\\\":1}) and number (2) cannot be divided\"\n",
     "stderr": "",
     "exitCode": 0
   },
@@ -152,6 +206,42 @@
     "stderr": "",
     "exitCode": 0
   },
+  "9dcb002c3171168d": {
+    "command": "jq -c 'try (. %= 0) catch .' input.json",
+    "files": {
+      "input.json": "8"
+    },
+    "stdout": "\"number (8) and number (0) cannot be divided (remainder) because the divisor is zero\"\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  "a3ae7bc3f2fe022f": {
+    "command": "jq -c '. += [1]' input.json",
+    "files": {
+      "input.json": "null"
+    },
+    "stdout": "[1]\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  "a49166dd52d198e5": {
+    "command": "jq -c 'try (.value - 1) catch .' input.json",
+    "files": {
+      "input.json": "{\"value\":[1,2]}"
+    },
+    "stdout": "\"array ([1,2]) and number (1) cannot be subtracted\"\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  "b6cf2cf5b9f4339d": {
+    "command": "jq -c 'try (.value + \"x\") catch .' input.json",
+    "files": {
+      "input.json": "{\"value\":4}"
+    },
+    "stdout": "\"number (4) and string (\\\"x\\\") cannot be added\"\n",
+    "stderr": "",
+    "exitCode": 0
+  },
   "be7d3ce4d9cebfea": {
     "command": "jq -c '.arr -= [1,null,[1],{\"x\":1}]' input.json",
     "files": {
@@ -161,12 +251,39 @@
     "stderr": "",
     "exitCode": 0
   },
+  "c0ec30ab6a29ef3b": {
+    "command": "jq -c 'try (.value * true) catch .' input.json",
+    "files": {
+      "input.json": "{\"value\":[]}"
+    },
+    "stdout": "\"array ([]) and boolean (true) cannot be multiplied\"\n",
+    "stderr": "",
+    "exitCode": 0
+  },
   "d5d1349f08e9b838": {
     "command": "jq -c 'try (.value /= 2) catch .' input.json",
     "files": {
       "input.json": "{\"value\":{\"a\":1}}"
     },
     "stdout": "\"object ({\\\"a\\\":1}) and number (2) cannot be divided\"\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  "de5e4dbe4aa5465e": {
+    "command": "jq -c 'try (.value -= 1) catch .' input.json",
+    "files": {
+      "input.json": "{\"value\":null}"
+    },
+    "stdout": "\"null (null) and number (1) cannot be subtracted\"\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  "e3916cb27fbe6182": {
+    "command": "jq -c 'try (.value % 3) catch .' input.json",
+    "files": {
+      "input.json": "{\"value\":\"a\"}"
+    },
+    "stdout": "\"string (\\\"a\\\") and number (3) cannot be divided (remainder)\"\n",
     "stderr": "",
     "exitCode": 0
   },
@@ -212,6 +329,15 @@
       "input.json": "{\"value\":[[[[[[[[[[[[1]]]]]]]]]]]]}"
     },
     "stdout": "\"array ([[[[[[[[[[[...) and number (1) cannot be subtracted\"\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  "fa7019ce1b0f1eff": {
+    "command": "jq -c '. *= 0' input.json",
+    "files": {
+      "input.json": "\"ab\""
+    },
+    "stdout": "\"\"\n",
     "stderr": "",
     "exitCode": 0
   },
