@@ -35,6 +35,12 @@ describe("jq arithmetic assignment", () => {
     ['{"value":{"a":{"b":1}}}', '.value *= {"a":{"c":2}}'],
     ['{"value":"a,b,c"}', '.value /= ","'],
     ['{"value":8}', ".value %= 3"],
+    ['{"value":"abcdefghijkl"}', "try (.value -= 1) catch ."],
+    ['{"value":"abcdefghijklm"}', "try (.value -= 1) catch ."],
+    ['{"value":"héllo wörld"}', "try (.value -= 1) catch ."],
+    ['{"value":"aaaaaaaa😀😀"}', "try (.value -= 1) catch ."],
+    ['{"value":"\\u0001\\u0002\\u0003"}', "try (.value -= 1) catch ."],
+    ['{"value":[[[[[[[[[[[[1]]]]]]]]]]]]}', "try (.value -= 1) catch ."],
   ])("%s | %s", async (input, filter) => {
     const env = await setupFiles(testDir, { "input.json": input });
     await compareOutputs(env, testDir, `jq -c '${filter}' input.json`);

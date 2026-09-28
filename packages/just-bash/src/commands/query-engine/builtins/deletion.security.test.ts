@@ -72,6 +72,26 @@ describe("query deletion safety", () => {
     ).toThrow(/query depth limit exceeded/);
   });
 
+  it("bounds recurse(f) paths that never terminate", () => {
+    expect(() =>
+      evaluate(sanitizeParsedData({ a: null }), parse("del(recurse(.a))"), {
+        limits: { maxDepth: 10 },
+      }),
+    ).toThrow(/query depth limit exceeded/);
+  });
+
+  it("previews rejected path results without serializing them in full", () => {
+    expect(() =>
+      evaluate(null, parse("del(reduce range(0;64) as $i (0; [.,.]))"), {
+        limits: { maxStringLength: 64 },
+      }),
+    ).toThrow(
+      new Error(
+        "Invalid path expression with result [[[[[[[[[[[[[[[[[[[[[[[[[[...",
+      ),
+    );
+  });
+
   it.each([
     '. += "abcdef"',
     ". *= 100",

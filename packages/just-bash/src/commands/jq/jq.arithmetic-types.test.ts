@@ -31,6 +31,21 @@ describe("jq arithmetic operand types", () => {
   });
 
   it.each([
+    ['"abcdefghijkl"', '"abcdefghijkl"'],
+    ['"abcdefghijklm"', '"abcdefghij...'],
+    ['"héllo wörld"', '"héllo wö...'],
+    ['"aaaaaaaa😀😀"', '"aaaaaaaa�...'],
+  ])("previews %s within jq's 15-byte buffer", async (value, preview) => {
+    const env = new Bash({ files: { "/input.json": value } });
+    const result = await env.exec("jq -c 'try (. - 1) catch .' /input.json");
+    expect(result.stdout).toBe(
+      `${JSON.stringify(`string (${preview}) and number (1) cannot be subtracted`)}\n`,
+    );
+    expect(result.stderr).toBe("");
+    expect(result.exitCode).toBe(0);
+  });
+
+  it.each([
     ['"ab"', ". *= -1", "null"],
     ['"ab"', ". *= 0", '""'],
     ["2", '. *= "ab"', '"abab"'],

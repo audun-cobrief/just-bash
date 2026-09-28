@@ -70,6 +70,16 @@ describe("query array subtraction safety", () => {
     ).toThrow(/query depth limit exceeded/);
   });
 
+  it("previews invalid operands without serializing them in full", () => {
+    expect(
+      evaluate(
+        null,
+        parse("reduce range(0;64) as $i ([0]; [.,.]) | try (. - 1) catch ."),
+        { limits: { maxStringLength: 64 } },
+      ),
+    ).toEqual(["array ([[[[[[[[[[[...) and number (1) cannot be subtracted"]);
+  });
+
   it("bounds result allocation even when the right operand is empty", () => {
     expect(() =>
       evaluate([1, 2, 3, 4], parse(". - []"), {

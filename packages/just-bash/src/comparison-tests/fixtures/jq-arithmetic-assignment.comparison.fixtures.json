@@ -26,6 +26,24 @@
     "stderr": "",
     "exitCode": 0
   },
+  "25411f55f2fd3f86": {
+    "command": "jq -c 'try (.value -= 1) catch .' input.json",
+    "files": {
+      "input.json": "{\"value\":\"abcdefghijklm\"}"
+    },
+    "stdout": "\"string (\\\"abcdefghij...) and number (1) cannot be subtracted\"\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  "2bd5543fe23bbbde": {
+    "command": "jq -c 'try (.value -= 1) catch .' input.json",
+    "files": {
+      "input.json": "{\"value\":\"\\u0001\\u0002\\u0003\"}"
+    },
+    "stdout": "\"string (\\\"\\\\u0001\\\\u00...) and number (1) cannot be subtracted\"\n",
+    "stderr": "",
+    "exitCode": 0
+  },
   "4040c5306c9b1596": {
     "command": "jq -c '.arr += [\"a\"]' input.json",
     "files": {
@@ -44,12 +62,30 @@
     "stderr": "",
     "exitCode": 0
   },
+  "41db83d07abce412": {
+    "command": "jq -c 'try (.value -= 1) catch .' input.json",
+    "files": {
+      "input.json": "{\"value\":\"aaaaaaaa😀😀\"}"
+    },
+    "stdout": "\"string (\\\"aaaaaaaa�...) and number (1) cannot be subtracted\"\n",
+    "stderr": "",
+    "exitCode": 0
+  },
   "46e7695879e9070e": {
     "command": "jq -c '.n -= 3' input.json",
     "files": {
       "input.json": "{\"n\":8}"
     },
     "stdout": "{\"n\":5}\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  "5977ad586052a222": {
+    "command": "jq -c 'try (.value -= 1) catch .' input.json",
+    "files": {
+      "input.json": "{\"value\":\"héllo wörld\"}"
+    },
+    "stdout": "\"string (\\\"héllo wö...) and number (1) cannot be subtracted\"\n",
     "stderr": "",
     "exitCode": 0
   },
@@ -107,6 +143,15 @@
     "stderr": "",
     "exitCode": 0
   },
+  "9a245f96be85968c": {
+    "command": "jq -c 'try (.value -= 1) catch .' input.json",
+    "files": {
+      "input.json": "{\"value\":\"abcdefghijkl\"}"
+    },
+    "stdout": "\"string (\\\"abcdefghijkl\\\") and number (1) cannot be subtracted\"\n",
+    "stderr": "",
+    "exitCode": 0
+  },
   "be7d3ce4d9cebfea": {
     "command": "jq -c '.arr -= [1,null,[1],{\"x\":1}]' input.json",
     "files": {
@@ -158,6 +203,15 @@
       "input.json": "{\"value\":2}"
     },
     "stdout": "{\"value\":\"abab\"}\n",
+    "stderr": "",
+    "exitCode": 0
+  },
+  "f8fc777bd40e93a1": {
+    "command": "jq -c 'try (.value -= 1) catch .' input.json",
+    "files": {
+      "input.json": "{\"value\":[[[[[[[[[[[[1]]]]]]]]]]]]}"
+    },
+    "stdout": "\"array ([[[[[[[[[[[...) and number (1) cannot be subtracted\"\n",
     "stderr": "",
     "exitCode": 0
   },

@@ -32,6 +32,8 @@ describe("jq type-filter deletion", () => {
       '{"i":"y","a":{"i":"x","x":1}}',
     ],
     ['{"i":"y","a":{"i":"x","x":1,"y":2}}', "path(.a[.i])", '["a","y"]'],
+    ['{"a":3}', "del(.a | tonumber)", "{}"],
+    ['{"a":"x"}', "del(.a | tostring)", "{}"],
   ])("%s | %s", async (input, filter, output) => {
     const env = new Bash({ files: { "/input.json": input } });
     const result = await env.exec(`jq -c '${filter}' /input.json`);
@@ -41,15 +43,16 @@ describe("jq type-filter deletion", () => {
   });
 
   it.each([
-    ". + 0",
-    "tonumber",
-    "length",
-  ])("rejects %s even when its result equals the input", async (filter) => {
-    const env = new Bash({ files: { "/input.json": '{"a":3}' } });
+    ['{"a":3}', ". + 0", "3"],
+    ['{"a":3}', "length", "3"],
+    ['{"a":"3"}', "tonumber", "3"],
+    ['{"a":3}', "tostring", '"3"'],
+  ])("rejects %s | %s because it does not return its input", async (input, filter, preview) => {
+    const env = new Bash({ files: { "/input.json": input } });
     const result = await env.exec(`jq -c 'del(.a | ${filter})' /input.json`);
     expect(result.stdout).toBe("");
     expect(result.stderr).toBe(
-      "jq: parse error: Invalid path expression with result 3\n",
+      `jq: parse error: Invalid path expression with result ${preview}\n`,
     );
     expect(result.exitCode).toBe(5);
   });

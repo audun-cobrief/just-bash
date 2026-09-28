@@ -122,6 +122,24 @@ describe("jq filters", () => {
       const result = await env.exec("echo '{\"foo\":42}' | jq '.foo?'");
       expect(result.stdout).toBe("42\n");
     });
+
+    it("should skip only the base values whose access fails", async () => {
+      const env = new Bash();
+      const result = await env.exec(
+        `echo '[{"x":1},4,{"x":2}]' | jq -c '[.[].x?]'`,
+      );
+      expect(result.stdout).toBe("[1,2]\n");
+    });
+
+    it("should not suppress errors from the base expression", async () => {
+      const env = new Bash();
+      const result = await env.exec("echo 1 | jq -c '[.a.b?]'");
+      expect(result.stdout).toBe("");
+      expect(result.stderr).toBe(
+        'jq: parse error: Cannot index number with string "a"\n',
+      );
+      expect(result.exitCode).toBe(5);
+    });
   });
 
   describe("try-catch", () => {

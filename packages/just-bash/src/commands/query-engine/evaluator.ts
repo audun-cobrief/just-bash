@@ -71,6 +71,12 @@ class JqError extends Error {
   }
 }
 
+/** jq passes a catch handler the error value, preserved if it is a JqError. */
+function caughtErrorValue(error: unknown): QueryValue {
+  if (error instanceof JqError) return error.value;
+  return error instanceof Error ? error.message : String(error);
+}
+
 const DEFAULT_MAX_JQ_ITERATIONS = 10000;
 const DEFAULT_MAX_STRING_LENGTH = 10 * 1024 * 1024;
 // Depth limit for nested structures - must be low enough to avoid V8 stack overflow
@@ -802,14 +808,7 @@ function evaluateNode(
       } catch (e) {
         if (e instanceof ExecutionLimitError) throw e;
         if (ast.catch) {
-          // jq: In catch handler, input is the error value (preserved if JqError)
-          const errorVal =
-            e instanceof JqError
-              ? e.value
-              : e instanceof Error
-                ? e.message
-                : String(e);
-          return evaluate(errorVal, ast.catch, ctx);
+          return evaluate(caughtErrorValue(e), ast.catch, ctx);
         }
         return [];
       }
@@ -931,12 +930,24 @@ function evaluateNode(
     }
 
     case "Optional": {
-      try {
-        return evaluate(value, ast.expr, ctx);
-      } catch (error) {
-        if (error instanceof ExecutionLimitError) throw error;
-        return [];
+      const tryEvaluate = (expr: AstNode): QueryValue[] => {
+        try {
+          return evaluate(value, expr, ctx);
+        } catch (error) {
+          if (error instanceof ExecutionLimitError) throw error;
+          return [];
+        }
+      };
+      const access = ast.expr;
+      // A postfix `?` only suppresses errors from its final access, separately
+      // for each base value, so errors in the base itself still propagate.
+      if ((isPathAccess(access) || access.type === "Slice") && access.base) {
+        const bases = evaluate(value, access.base, ctx);
+        return boundedFlatMap(ctx, bases, (base) =>
+          tryEvaluate({ ...access, base: { type: "Literal", value: base } }),
+        );
       }
+      return tryEvaluate(access);
     }
 
     case "StringInterp": {
@@ -1326,8 +1337,8 @@ function applyDel(
       chargeQueryWork(ctx);
       let key = component;
       if (Array.isArray(value) && typeof key === "number") {
-        key = Math.trunc(key);
-        if (key < 0) key += value.length;
+        // jq offsets negative indexes before truncating, so -0.5 is past the end.
+        key = Math.trunc(key) + (key < 0 ? value.length : 0);
         if (!Number.isFinite(key) || key < 0 || key >= value.length) {
           found = false;
           break;
@@ -1392,6 +1403,53 @@ function applyDel(
   return removePaths(root, deletion);
 }
 
+/**
+ * Serializes a value as JSON only until the output exceeds `maxLength`
+ * characters, so previews of large or deeply shared values stay cheap.
+ */
+function jsonPrefix(value: QueryValue, maxLength: number): string {
+  let output = "";
+  const write = (item: QueryValue): void => {
+    if (typeof item === "string") {
+      output += JSON.stringify(item.slice(0, maxLength + 1));
+    } else if (Array.isArray(item)) {
+      output += "[";
+      for (let i = 0; i < item.length && output.length <= maxLength; i++) {
+        if (i > 0) output += ",";
+        write(item[i]);
+      }
+      output += "]";
+    } else if (item && typeof item === "object") {
+      output += "{";
+      let first = true;
+      for (const [key, child] of Object.entries(item)) {
+        if (output.length > maxLength) break;
+        if (!first) output += ",";
+        first = false;
+        output += `${JSON.stringify(key.slice(0, maxLength + 1))}:`;
+        write(child);
+      }
+      output += "}";
+    } else {
+      output += JSON.stringify(item) ?? "null";
+    }
+  };
+  write(value);
+  return output;
+}
+
+/**
+ * Formats a value for an error message like jq's `jv_dump_string_trunc`:
+ * JSON longer than `bufferSize - 1` UTF-8 bytes is cut and marked with "...".
+ */
+function jqValuePreview(value: QueryValue, bufferSize: number): string {
+  const maxBytes = bufferSize - 1;
+  const json = jsonPrefix(value, maxBytes);
+  const bytes = new TextEncoder().encode(json);
+  if (bytes.length <= maxBytes) return json;
+  return `${new TextDecoder().decode(bytes.subarray(0, maxBytes - 3))}...`;
+}
+
 function arithmeticTypeError(
   left: QueryValue,
   right: QueryValue,
@@ -1400,9 +1458,7 @@ function arithmeticTypeError(
   const describe = (value: QueryValue): string => {
     const type =
       value === null ? "null" : Array.isArray(value) ? "array" : typeof value;
-    const json = JSON.stringify(value) ?? "null";
-    const preview = json.length > 15 ? `${json.slice(0, 11)}...` : json;
-    return `${type} (${preview})`;
+    return `${type} (${jqValuePreview(value, 15)})`;
   };
   return new Error(
     `${describe(left)} and ${describe(right)} cannot be ${operation}`,
@@ -1938,6 +1994,30 @@ function evalBuiltin(
   }
 }
 
+/**
+ * Follows one path component like jq: null yields null, and a container of
+ * the wrong type is an error rather than a missing member.
+ */
+function getPathComponent(
+  current: QueryValue,
+  key: string | number,
+): QueryValue {
+  if (current == null) return null;
+  if (typeof key === "number") {
+    if (!Array.isArray(current)) {
+      throw new Error(`Cannot index ${typeof current} with number`);
+    }
+    const index = Math.trunc(key);
+    return current[index < 0 ? current.length + index : index] ?? null;
+  }
+  const obj = asQueryRecord(current);
+  if (!obj) {
+    const type = Array.isArray(current) ? "array" : typeof current;
+    throw new Error(`Cannot index ${type} with string ${JSON.stringify(key)}`);
+  }
+  return Object.hasOwn(obj, key) ? (obj[key] ?? null) : null;
+}
+
 function getPathValue(
   value: QueryValue,
   path: (string | number)[],
@@ -1946,26 +2026,21 @@ function getPathValue(
   let current = value;
   for (const key of path) {
     chargeQueryWork(ctx);
-    if (Array.isArray(current) && typeof key === "number") {
-      const index = Math.trunc(key);
-      current = current[index < 0 ? current.length + index : index];
-    } else {
-      const obj = asQueryRecord(current);
-      if (typeof key === "string" && current != null && !obj) {
-        const type = Array.isArray(current) ? "array" : typeof current;
-        throw new Error(
-          `Cannot index ${type} with string ${JSON.stringify(key)}`,
-        );
-      }
-      if (typeof key !== "string" || !obj || !Object.hasOwn(obj, key))
-        return null;
-      current = obj[key];
-    }
+    current = getPathComponent(current, key);
   }
-  return current ?? null;
+  return current;
+}
+
+function isPathAccess(
+  node: AstNode,
+): node is Extract<AstNode, { type: "Field" | "Index" | "Iterate" }> {
+  return (
+    node.type === "Field" || node.type === "Index" || node.type === "Iterate"
+  );
 }
 
 const PATH_PRESERVING_BUILTINS = new Set([
+  "debug",
   "select",
   "numbers",
   "strings",
@@ -2019,28 +2094,43 @@ function collectPaths(
   // Try to extract a static path from the AST
   const staticPath = extractPathFromAst(expr);
   if (staticPath !== null) {
+    getPathValue(value, staticPath, ctx);
     appendPath([...currentPath, ...staticPath]);
     return;
   }
 
-  if (
-    expr.type === "Field" ||
-    expr.type === "Index" ||
-    expr.type === "Iterate"
-  ) {
+  // A postfix `?` only suppresses errors from its final access, separately
+  // for each base value, so traversal continues past invalid members.
+  const access =
+    expr.type === "Optional" && isPathAccess(expr.expr) ? expr.expr : expr;
+  const optional = access !== expr;
+  if (isPathAccess(access)) {
     const basePaths: (string | number)[][] = [];
-    if (expr.base) collectPaths(value, expr.base, ctx, [], basePaths, strict);
-    else basePaths.push([]);
+    if (access.base) {
+      collectPaths(value, access.base, ctx, [], basePaths, strict);
+    } else {
+      basePaths.push([]);
+    }
     for (const basePath of basePaths) {
       const baseValue = getPathValue(value, basePath, ctx);
-      if (expr.type === "Field") {
-        appendPath([...currentPath, ...basePath, expr.name]);
-      } else if (expr.type === "Index") {
-        for (const index of evaluate(value, expr.index, ctx)) {
-          if (typeof index !== "string" && typeof index !== "number") {
+      const appendChild = (key: string | number): void => {
+        try {
+          getPathComponent(baseValue, key);
+        } catch (error) {
+          if (optional && !(error instanceof ExecutionLimitError)) return;
+          throw error;
+        }
+        appendPath([...currentPath, ...basePath, key]);
+      };
+      if (access.type === "Field") {
+        appendChild(access.name);
+      } else if (access.type === "Index") {
+        for (const index of evaluate(value, access.index, ctx)) {
+          if (typeof index === "string" || typeof index === "number") {
+            appendChild(index);
+          } else if (!optional) {
             throw new Error("path components must be strings or numbers");
           }
-          appendPath([...currentPath, ...basePath, index]);
         }
       } else if (Array.isArray(baseValue)) {
         for (let index = 0; index < baseValue.length; index++) {
@@ -2052,9 +2142,10 @@ function collectPaths(
           chargeQueryWork(ctx);
           appendPath([...currentPath, ...basePath, key]);
         }
-      } else {
+      } else if (!optional) {
+        const type = baseValue === null ? "null" : typeof baseValue;
         throw new Error(
-          `Cannot iterate over ${baseValue === null ? "null" : typeof baseValue}`,
+          `Cannot iterate over ${type} (${jqValuePreview(baseValue, 15)})`,
         );
       }
     }
@@ -2062,7 +2153,10 @@ function collectPaths(
   }
 
   // Handle Recurse (..) - recursive descent, returns paths to all values
-  if (expr.type === "Recurse") {
+  if (
+    expr.type === "Recurse" ||
+    (expr.type === "Call" && expr.name === "recurse" && expr.args.length === 0)
+  ) {
     const stack: Array<{ value: QueryValue; path: (string | number)[] }> = [
       { value, path: [] },
     ];
@@ -2117,19 +2211,216 @@ function collectPaths(
     return;
   }
 
-  const results = evaluate(value, expr, ctx);
-  if (results.length === 0) return;
-  // Preserve path()/pick()'s fallback, but never guess a deletion target from
-  // an evaluated value: a transformation could otherwise delete its input.
-  if (!strict) {
-    appendPath(currentPath);
+  const appendResults = (results: QueryValue[]): void => {
+    if (results.length === 0) return;
+    // Preserve path()/pick()'s fallback, but never guess a deletion target from
+    // an evaluated value: a transformation could otherwise delete its input.
+    if (!strict) {
+      appendPath(currentPath);
+      return;
+    }
+    throw new Error(
+      `Invalid path expression with result ${jqValuePreview(results[0], 30)}`,
+    );
+  };
+
+  if (expr.type === "Try") {
+    try {
+      collectPaths(value, expr.body, ctx, currentPath, paths, strict);
+    } catch (error) {
+      if (error instanceof ExecutionLimitError) throw error;
+      if (error instanceof BreakError) throw error;
+      if (expr.catch) {
+        appendResults(evaluate(caughtErrorValue(error), expr.catch, ctx));
+      }
+    }
     return;
   }
-  if (expr.type === "Call" && PATH_PRESERVING_BUILTINS.has(expr.name)) {
+
+  if (expr.type === "Label") {
+    const labels = new Set([...(ctx.labels ?? []), expr.name]);
+    try {
+      collectPaths(
+        value,
+        expr.body,
+        { ...ctx, labels },
+        currentPath,
+        paths,
+        strict,
+      );
+    } catch (error) {
+      if (!(error instanceof BreakError && error.label === expr.name)) {
+        throw error;
+      }
+    }
+    return;
+  }
+
+  // Destructuring reads the bound value through paths of its own, which jq
+  // rejects inside path expressions, so only plain `as $name` passes through.
+  if (expr.type === "VarBind" && !expr.pattern && !expr.alternatives) {
+    for (const bound of evaluate(value, expr.value, ctx)) {
+      collectPaths(
+        value,
+        expr.body,
+        withVar(ctx, expr.name, bound),
+        currentPath,
+        paths,
+        strict,
+      );
+    }
+    return;
+  }
+
+  if (expr.type === "Cond") {
+    for (const cond of evaluate(value, expr.cond, ctx)) {
+      const branch = isTruthy(cond)
+        ? expr.then
+        : (expr.elifs.find((elif) =>
+            evaluate(value, elif.cond, ctx).some(isTruthy),
+          )?.then ?? expr.else);
+      if (branch) {
+        collectPaths(value, branch, ctx, currentPath, paths, strict);
+      } else {
+        appendPath(currentPath);
+      }
+    }
+    return;
+  }
+
+  if (expr.type === "BinaryOp" && expr.op === "//") {
+    const leftPaths: (string | number)[][] = [];
+    collectPaths(value, expr.left, ctx, [], leftPaths, strict);
+    const truthyPaths = leftPaths.filter((path) =>
+      isTruthy(getPathValue(value, path, ctx)),
+    );
+    if (truthyPaths.length === 0) {
+      collectPaths(value, expr.right, ctx, currentPath, paths, strict);
+    }
+    for (const path of truthyPaths) appendPath([...currentPath, ...path]);
+    return;
+  }
+
+  // Like jq, keep only the first `count` paths and ignore an error raised
+  // after them, since jq stops the generator before reaching it.
+  const leadingPaths = (
+    generator: AstNode,
+    count: number,
+  ): (string | number)[][] => {
+    const leading: (string | number)[][] = [];
+    try {
+      collectPaths(value, generator, ctx, currentPath, leading, strict);
+    } catch (error) {
+      if (error instanceof ExecutionLimitError || leading.length < count) {
+        throw error;
+      }
+    }
+    return leading.slice(0, count);
+  };
+
+  if (expr.type === "Call" && expr.args.length > 0) {
+    const [first, second] = expr.args;
+    if (expr.name === "first" && expr.args.length === 1) {
+      for (const path of leadingPaths(first, 1)) appendPath(path);
+      return;
+    }
+    if (expr.name === "limit" && second) {
+      for (const n of evaluate(value, first, ctx)) {
+        const count = n as number;
+        if (count < 0) throw new Error("limit doesn't support negative count");
+        if (count === 0) continue;
+        for (const path of leadingPaths(second, count)) appendPath(path);
+      }
+      return;
+    }
+    if (expr.name === "nth" && second) {
+      for (const n of evaluate(value, first, ctx)) {
+        const index = n as number;
+        if (index < 0) throw new Error("nth doesn't support negative indices");
+        const path = leadingPaths(second, index + 1)[index];
+        if (path) appendPath(path);
+      }
+      return;
+    }
+    if (expr.name === "getpath" && expr.args.length === 1) {
+      for (const path of evaluate(value, first, ctx)) {
+        if (!Array.isArray(path)) {
+          throw new Error("Path must be specified as an array");
+        }
+        const keys: (string | number)[] = [];
+        for (const key of path) {
+          if (typeof key !== "string" && typeof key !== "number") {
+            throw new Error("path components must be strings or numbers");
+          }
+          keys.push(key);
+        }
+        getPathValue(value, keys, ctx);
+        appendPath([...currentPath, ...keys]);
+      }
+      return;
+    }
+    if (expr.name === "recurse" && expr.args.length <= 2) {
+      const stack: (string | number)[][] = [[]];
+      while (stack.length > 0) {
+        const path = stack.pop();
+        if (!path) break;
+        appendPath([...currentPath, ...path]);
+        const children: (string | number)[][] = [];
+        collectPaths(
+          getPathValue(value, path, ctx),
+          first,
+          ctx,
+          path,
+          children,
+          strict,
+        );
+        const next = second
+          ? children.filter((child) =>
+              evaluate(getPathValue(value, child, ctx), second, ctx).some(
+                isTruthy,
+              ),
+            )
+          : children;
+        assertQueryResultCapacity(ctx, 0, stack.length + next.length);
+        for (let i = next.length - 1; i >= 0; i--) stack.push(next[i]);
+      }
+      return;
+    }
+  }
+
+  const results = evaluate(value, expr, ctx);
+  if (strict && expr.type === "Call" && returnsInput(expr, value, ctx)) {
     for (const _result of results) appendPath(currentPath);
     return;
   }
-  throw new Error(
-    `Invalid path expression with result ${JSON.stringify(results[0])}`,
-  );
+  appendResults(results);
+}
+
+/**
+ * Whether a builtin returns its input itself rather than a new value, which
+ * jq treats as keeping the input's path.
+ */
+function returnsInput(
+  call: Extract<AstNode, { type: "Call" }>,
+  value: QueryValue,
+  ctx: EvalContext,
+): boolean {
+  if (PATH_PRESERVING_BUILTINS.has(call.name)) return true;
+  switch (call.name) {
+    case "tonumber":
+      return typeof value === "number";
+    case "tostring":
+      return typeof value === "string";
+    case "ltrimstr":
+    case "rtrimstr": {
+      if (typeof value !== "string" || call.args.length !== 1) return true;
+      const [affix] = evaluate(value, call.args[0], ctx);
+      if (typeof affix !== "string") return true;
+      return call.name === "ltrimstr"
+        ? !value.startsWith(affix)
+        : !value.endsWith(affix);
+    }
+    default:
+      return false;
+  }
 }
